@@ -1,0 +1,4 @@
+pyyaml
+tqdm
+numpy==1.19.1
+wandb

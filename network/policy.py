@@ -29,7 +29,7 @@ class decrete_Policy(nn.Module):
     
     def evaluate_log_pi(self, states, actions):
         probs = F.softmax(self.net(states),dim=1)
-        return probs.gather(1, actions.type(torch.int64))
+        return torch.log(probs.gather(1, actions.type(torch.int64)))
 
 class StateIndependentPolicy(nn.Module):
     def __init__(self, state_shape, action_shape, hidden_units=(64, 64),
