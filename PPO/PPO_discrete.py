@@ -80,7 +80,7 @@ class PPO_discrete(Algorithm):
     def step(self, env, state, t):
         t += 1
         action, log_pi = self.explore(state)
-        next_state, reward, done, truncated, info  = env.step(action)
+        next_state, reward, done, info  = env.step(action)
         mask = False if t == env._max_episode_steps else done
         self.buffer.append(state, np.asarray([action]), reward * self.reward_factor, mask, log_pi, next_state)
         self.rewards.append(reward * self.reward_factor)
@@ -89,7 +89,7 @@ class PPO_discrete(Algorithm):
         if done:
             self.env_length.append(t)
             t = 0
-            next_state, info = env.reset()
+            next_state = env.reset()
         return next_state, t
 
     def update(self,log_info):

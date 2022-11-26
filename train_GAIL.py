@@ -73,8 +73,8 @@ def main():
     
     if not os.path.exists(weight_path):
         os.makedirs(weight_path)
-    
-    state, info = env.reset(seed=seed)
+
+    state, info = env.reset()
     t = 0
     log_cnt = 0
     eval_return = -np.inf

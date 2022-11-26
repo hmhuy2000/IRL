@@ -20,15 +20,18 @@ def evaluate(algo, env, step_idx,log_info):
     mean_return = 0.0
 
     for _ in range(num_eval_episodes):
-        state, info = env.reset()
+        state = env.reset()
         episode_return = 0.0
         done = False
+        t = 0
         while (not done):
+            t += 1
             action = algo.exploit(state)
-            state, reward, done, truncated, info = env.step(action)
+            state, reward, done, info = env.step(action)
             episode_return += reward
-            if (truncated):
+            if (t >= max_episode_length):
                 break
+            
         mean_return += episode_return / num_eval_episodes
     log_info['validation/return'] = mean_return
     return mean_return
@@ -67,7 +70,7 @@ def main_PPO():
     if not os.path.exists(weight_path):
         os.makedirs(weight_path)
         
-    state, info = env.reset(seed=seed)
+    state = env.reset()
     t = 0
     log_cnt = 0
     eval_return = -np.inf

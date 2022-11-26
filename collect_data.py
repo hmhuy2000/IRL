@@ -47,7 +47,7 @@ def main_PPO():
 
     algo.load_models(load_dir=load_dir)
     algo.eval()
-    state, info = test_env.reset(seed=seed)
+    state, info = test_env.reset()
     t = 0
     returns = []
     total = 0

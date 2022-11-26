@@ -2,3 +2,4 @@ pyyaml
 tqdm
 numpy==1.19.1
 wandb
+gym~=0.15.3
