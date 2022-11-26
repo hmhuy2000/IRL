@@ -1,7 +1,8 @@
 from base_algo import sample_Algorithm
-# from PPO.PPO_continuous import *
-from PPO.PPO_discrete import *
+from PPO.PPO_continuous import *
+# from PPO.PPO_discrete import *
 import gym
+import safety_gym
 import sys
 from tqdm import trange
 import wandb
@@ -29,7 +30,7 @@ def evaluate(algo, env, step_idx,log_info):
             action = algo.exploit(state)
             state, reward, done, info = env.step(action)
             episode_return += reward
-            if (t >= max_episode_length):
+            if (t >= env.num_steps):
                 break
             
         mean_return += episode_return / num_eval_episodes
@@ -60,13 +61,13 @@ def main_PPO():
     else:
         print('----------------------no Wandb-----------------------')
 
-    algo = PPO_discrete(state_shape=state_shape, action_shape=action_shape,
+    algo = PPO_continuous(state_shape=state_shape, action_shape=action_shape,
             device=device, seed=seed, gamma=gamma,buffer_size=buffer_size,
             mix=mix, hidden_units_actor=hidden_units_actor,
             hidden_units_critic=hidden_units_critic,
             lr_actor=lr_actor,lr_critic=lr_critic, epoch_ppo=epoch_ppo,
             clip_eps=clip_eps, lambd=lambd, coef_ent=coef_ent,
-            max_grad_norm=max_grad_norm,reward_factor=reward_factor,max_episode_length=max_episode_length)
+            max_grad_norm=max_grad_norm,reward_factor=reward_factor,max_episode_length=env.num_steps)
     if not os.path.exists(weight_path):
         os.makedirs(weight_path)
         

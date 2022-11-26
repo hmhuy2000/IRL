@@ -81,7 +81,7 @@ class PPO_discrete(Algorithm):
         t += 1
         action, log_pi = self.explore(state)
         next_state, reward, done, info  = env.step(action)
-        mask = False if t == env._max_episode_steps else done
+        mask = done
         self.buffer.append(state, np.asarray([action]), reward * self.reward_factor, mask, log_pi, next_state)
         self.rewards.append(reward * self.reward_factor)
         if (self.max_episode_length and t>=self.max_episode_length):
