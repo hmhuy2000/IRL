@@ -136,12 +136,11 @@ class WCSACAgent(Agent):
         assert action.ndim == 2 and action.shape[0] == 1
         return utils.to_np(action[0])
 
-    def update_critic(self, obs, action, reward, cost, next_obs, not_done, logger, step):
+    def update_critic(self, obs, action, reward, cost, next_obs, not_done, log_info, step):
         # Get next action from current pi_theta(*|next_obs)
         dist = self.actor(next_obs)
         next_action = dist.rsample()
         log_prob = dist.log_prob(next_action).sum(-1, keepdim=True)
-        logger.log('train/actor_variance', torch.mean(self.actor.outputs["std"]), step)
         # get current Q estimates
         current_Q1, current_Q2 = self.critic(obs, action)
 
@@ -173,24 +172,25 @@ class WCSACAgent(Agent):
 
         # Critic Loss
         critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
-        logger.log("train/critic_loss", critic_loss, step)
 
         # Safety Critic Loss
         safety_critic_loss = F.mse_loss(current_QC, target_QC) + torch.mean(
             current_VC + target_VC - 2 * torch.sqrt(current_VC * target_VC)
         )
-        logger.log("train/safety_critic_loss", safety_critic_loss, step)
 
         # Jointly optimize Reward and Safety Critics
         total_loss = critic_loss + safety_critic_loss
         self.all_critics_optimizer.zero_grad()
         total_loss.backward()
         self.all_critics_optimizer.step()
+        if (step%1000==0):
+            log_info['train/actor_variance']=torch.mean(self.actor.outputs["std"])
+            log_info['train/critic_loss']=critic_loss
+            log_info['train/safety_critic_loss']=safety_critic_loss
 
-        # self.critic.log(logger, step)
-        # self.safety_critic.log(logger, step)
 
-    def update_actor_and_alpha_and_beta(self, obs, action_taken, logger, step):
+
+    def update_actor_and_alpha_and_beta(self, obs, action_taken, log_info, step):
         # Get updated action from current pi_theta(*|obs)
         dist = self.actor(obs)
         action = dist.rsample()  # uses reparametrization trick
@@ -218,55 +218,49 @@ class WCSACAgent(Agent):
             - actor_Q
             + (self.beta.detach() - damp) * (actor_QC + self.pdf_cdf.cuda() * torch.sqrt(actor_VC))
         )
-
-        logger.log("train/actor_loss", actor_loss, step)
-        logger.log("train/actor_entropy", -log_prob.mean(), step)
-        logger.log(
-            "train/actor_cost",
-            torch.mean(actor_QC + self.pdf_cdf.cuda() * torch.sqrt(actor_VC)),
-            step,
-        )
-
+        if (step%1000==0):
+            log_info['train/actor_loss']=actor_loss
+            log_info['train/actor_entropy']=-log_prob.mean()
+            log_info['train/actor_cost']=torch.mean(actor_QC + self.pdf_cdf.cuda() * torch.sqrt(actor_VC))
+        
         # Optimize the actor
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
-        # self.actor.log(logger, step)
 
         if self.learnable_temperature:
             self.log_alpha_optimizer.zero_grad()
             alpha_loss = torch.mean(self.alpha * (-log_prob - self.target_entropy).detach())
-            logger.log("train/alpha_loss", alpha_loss, step)
-            logger.log("train/alpha_value", self.alpha, step)
             alpha_loss.backward()
             self.log_alpha_optimizer.step()
 
             self.log_beta_optimizer.zero_grad()
             beta_loss = torch.mean(self.beta * (self.target_cost - cvar).detach())
-            logger.log("train/beta_loss", beta_loss, step)
-            logger.log("train/beta_value", self.beta, step)
             beta_loss.backward()
             self.log_beta_optimizer.step()
+            
+            if (step%1000==0):
+                log_info['train/alpha_loss']=alpha_loss
+                log_info['train/alpha_value']=self.alpha
+                log_info['train/beta_loss']=beta_loss
+                log_info['train/beta_value']=self.beta
 
-    def update(self, replay_buffer, logger, step):
+    def update(self, replay_buffer, log_info, step):
         (
             obs,
             action,
             reward,
             cost,
-            next_obs,
-            not_done,
             not_done_no_max,
+            next_obs,
         ) = replay_buffer.sample(self.batch_size)
 
-        logger.log("train/batch_reward", reward.mean(), step)
-        logger.log("train/batch_cost", cost.mean(), step)
 
-        self.update_critic(obs, action, reward, cost, next_obs, not_done_no_max, logger, step)
+        self.update_critic(obs, action, reward, cost, next_obs, not_done_no_max, log_info, step)
 
         if step % self.actor_update_frequency == 0:
-            self.update_actor_and_alpha_and_beta(obs, action, logger, step)
+            self.update_actor_and_alpha_and_beta(obs, action, log_info, step)
 
         if step % self.critic_target_update_frequency == 0:
             utils.soft_update_params(self.critic, self.critic_target, self.critic_tau)

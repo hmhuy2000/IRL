@@ -2,14 +2,23 @@
 import torch
 import os
 import time
-
+import sys
+sys.path.append('..')
 from video import VideoRecorder
 from logger import Logger
 from replay_buffer import ReplayBuffer
+from buffer import RolloutBufferwithCost
 import utils
 
 import hydra
+from tqdm import trange,tqdm
+import wandb
 
+def Wandb_logging(diction, step_idx, wandb_logs):
+    if (wandb_logs):
+        wandb.log(diction, step = step_idx)
+    else:
+        print(f'[INFO] {diction} step {step_idx}')
 
 class Workspace(object):
     def __init__(self, cfg):
@@ -18,12 +27,12 @@ class Workspace(object):
 
         self.cfg = cfg
 
-        self.logger = Logger(
-            self.work_dir,
-            save_tb=cfg.log_save_tb,
-            log_frequency=cfg.log_frequency,
-            agent=cfg.agent.name,
-        )
+        if (cfg.wandb_logs):
+            print('---------------------using Wandb---------------------')
+            wandb.init(project=cfg.env, settings=wandb.Settings(_disable_stats=True), \
+            group='WCSAC', name=f'{cfg.seed}', entity='hmhuy')
+        else:
+            print('----------------------no Wandb-----------------------')
 
         assert 1 >= cfg.risk_level >= 0, f"risk_level must be between 0 and 1 (inclusive), got: {cfg.risk_level}"
         assert cfg.seed != -1, f"seed must be provided, got default seed: {cfg.seed}"
@@ -39,12 +48,23 @@ class Workspace(object):
         ]
         self.agent = hydra.utils.instantiate(cfg.agent)
 
-        self.replay_buffer = ReplayBuffer(
-            self.env.observation_space.shape,
-            self.env.action_space.shape,
-            int(cfg.replay_buffer_capacity),
-            self.device,
+        state_shape = self.env.observation_space.shape
+        action_shape = self.env.action_space.shape
+
+        self.replay_buffer = RolloutBufferwithCost(
+        buffer_size=int(cfg.replay_buffer_capacity),
+        state_shape=state_shape,
+        action_shape=action_shape,
+        device=self.device,
+        mix=1
         )
+
+        # self.replay_buffer = ReplayBuffer(
+        #     self.env.observation_space.shape,
+        #     self.env.action_space.shape,
+        #     int(cfg.replay_buffer_capacity),
+        #     self.device,
+        # )
 
         self.video_recorder = VideoRecorder(self.work_dir if cfg.save_video else None)
         self.step = 0
@@ -53,7 +73,7 @@ class Workspace(object):
 
         utils.make_dir(self.work_dir, "model_weights")
 
-    def evaluate(self):
+    def evaluate(self,log_info):
         mean_reward = 0
         mean_cost = 0
         mean_goals_met = 0
@@ -90,34 +110,31 @@ class Workspace(object):
         mean_cost /= self.cfg.num_eval_episodes
         mean_goals_met /= self.cfg.num_eval_episodes
         mean_hazard_touches /= self.cfg.num_eval_episodes
-        self.logger.log("eval/mean_reward", mean_reward, self.step)
-        self.logger.log("eval/mean_cost", mean_cost, self.step)
-        self.logger.log("eval/mean_goals_met", mean_goals_met, self.step)
-        self.logger.log("eval/hazard_touches", mean_hazard_touches, self.step)
-        self.logger.log("eval/cost_limit_violations", cost_limit_violations, self.step)
-        self.logger.dump(self.step)
+        log_info['eval/return'] = mean_reward
+        log_info['eval/cost'] = mean_cost
+        log_info['eval/goals_met'] = mean_goals_met
+        log_info['eval/hazard_touches'] = mean_hazard_touches
+        log_info['eval/cost_limit_violations'] = cost_limit_violations
+        
+
         self.agent.save(self.work_dir)
         self.agent.save_actor(os.path.join(self.work_dir, "model_weights"), self.step)
 
     def run(self):
+        log_cnt = 0
         episode, ep_reward, ep_cost, total_cost, done = 0, 0, 0, 0, True
         start_time = time.time()
-        while self.step < self.cfg.num_train_steps:
+        for self.step in trange(int(self.cfg.num_train_steps)):
+            log_info = {}
             if done:
-                if self.step > 0:
-                    self.logger.log("train/duration", time.time() - start_time, self.step)
-                    start_time = time.time()
-                    self.logger.dump(self.step, save=(self.step > self.cfg.num_seed_steps))
-
                 # evaluate agent periodically
                 if (self.step > 0 and self.step % self.cfg.eval_frequency == 0):
-                    self.logger.log("eval/episode", episode, self.step)
-                    self.evaluate()
+                    self.evaluate(log_info=log_info)
 
-                self.logger.log("train/episode_reward", ep_reward, self.step)
-                self.logger.log("train/episode_cost", ep_cost, self.step)
+                log_info['train/episode_reward'] = ep_reward
+                log_info['train/episode_cost'] = ep_cost
                 if self.step > 0:
-                    self.logger.log("train/cost_rate", total_cost / self.step, self.step)
+                    log_info['train/cost_rate'] = total_cost / self.step
 
                 obs = self.env.reset()
                 self.agent.reset()
@@ -126,8 +143,6 @@ class Workspace(object):
                 ep_cost = 0
                 ep_step = 0
                 episode += 1
-
-                self.logger.log("train/episode", episode, self.step)
 
             # sample action for data collection
             if self.step < self.cfg.num_seed_steps:
@@ -138,7 +153,7 @@ class Workspace(object):
 
             # run training update
             if self.step >= self.cfg.num_seed_steps:
-                self.agent.update(self.replay_buffer, self.logger, self.step)
+                self.agent.update(self.replay_buffer, log_info, self.step)
 
             next_obs, reward, done, info = self.env.step(action)
             cost = info.get("cost", 0)
@@ -148,14 +163,18 @@ class Workspace(object):
             ep_reward += reward
             ep_cost += cost
             total_cost += cost
-            self.replay_buffer.add(obs, action, reward, cost, next_obs, done, done_no_max)
-
+            # self.replay_buffer.add(obs, action, reward, cost, next_obs, done, done_no_max)
+            self.replay_buffer.append(obs, action, reward, cost,done_no_max, next_obs)
             obs = next_obs
             ep_step += 1
             self.step += 1
+
+            if (len(log_info.keys())>0):
+                Wandb_logging(diction=log_info, step_idx=log_cnt,wandb_logs=self.cfg.wandb_logs)
+                log_cnt += 1
+        log_info = {}
         self.agent.save(self.work_dir)
-        self.logger.log("eval/episode", episode, self.step)
-        self.evaluate()
+        self.evaluate(log_info)
 
 
 @hydra.main(config_path="config/train.yaml", strict=True)
