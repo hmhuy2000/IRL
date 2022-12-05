@@ -1,6 +1,5 @@
-from base_algo import sample_Algorithm
-from PPO.PPO_continuous import *
-# from PPO.PPO_discrete import *
+from PPO.PPO_lag_continuous import *
+
 import gym
 import safety_gym
 import sys
@@ -19,10 +18,12 @@ def Wandb_logging(diction, step_idx, wandb_logs):
 
 def evaluate(algo, env, step_idx,log_info):
     mean_return = 0.0
+    mean_cost = 0.0
 
     for _ in range(num_eval_episodes):
         state = env.reset()
         episode_return = 0.0
+        episode_cost = 0.0
         done = False
         t = 0
         while (not done):
@@ -30,11 +31,14 @@ def evaluate(algo, env, step_idx,log_info):
             action = algo.exploit(state)
             state, reward, done, info = env.step(action)
             episode_return += reward
+            episode_cost += info['cost']
             if (t >= env.num_steps):
                 break
             
         mean_return += episode_return / num_eval_episodes
+        mean_cost += episode_cost / num_eval_episodes
     log_info['validation/return'] = mean_return
+    log_info['validation/cost'] = mean_cost
     return mean_return
 
 def main_PPO():
@@ -57,7 +61,7 @@ def main_PPO():
     if (wandb_logs):
         print('---------------------using Wandb---------------------')
         wandb.init(project=env_name, settings=wandb.Settings(_disable_stats=True), \
-        group='PPO', name=f'{seed}', entity='hmhuy')
+        group='PPO-lag', name=f'{seed}', entity='hmhuy')
     else:
         print('----------------------no Wandb-----------------------')
 
@@ -65,9 +69,10 @@ def main_PPO():
             device=device, seed=seed, gamma=gamma,buffer_size=buffer_size,
             mix=mix, hidden_units_actor=hidden_units_actor,
             hidden_units_critic=hidden_units_critic,
-            lr_actor=lr_actor,lr_critic=lr_critic, epoch_ppo=epoch_ppo,
+            lr_actor=lr_actor,lr_critic=lr_critic,lr_cost_critic=lr_cost_critic,lr_penalty=lr_penalty, epoch_ppo=epoch_ppo,
             clip_eps=clip_eps, lambd=lambd, coef_ent=coef_ent,
-            max_grad_norm=max_grad_norm,reward_factor=reward_factor,max_episode_length=env.num_steps)
+            max_grad_norm=max_grad_norm,reward_factor=reward_factor,max_episode_length=env.num_steps,
+            cost_limit=cost_limit)
     if not os.path.exists(weight_path):
         os.makedirs(weight_path)
         

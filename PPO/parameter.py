@@ -15,6 +15,8 @@ training_group.add_argument('--hidden_units_actor',type=int,default=64)
 training_group.add_argument('--hidden_units_critic',type=int,default=64)
 training_group.add_argument('--lr_actor', type=float, default=1e-2)
 training_group.add_argument('--lr_critic', type=float, default=1e-2)
+training_group.add_argument('--lr_cost_critic', type=float, default=1e-2)
+training_group.add_argument('--lr_penalty', type=float, default=1e-2)
 training_group.add_argument('--epoch_ppo',type=int,default=50)
 training_group.add_argument('--clip_eps', type=float, default=0.2)
 training_group.add_argument('--lambd', type=float, default=0.97)
@@ -26,9 +28,10 @@ training_group.add_argument('--eval_interval',type=int,default=int(1e5))
 training_group.add_argument('--num_eval_episodes',type=int,default=10)
 training_group.add_argument('--max_episode_length',type=int,default=None)
 training_group.add_argument('--reward_factor',type=float,default=1.0)
-training_group.add_argument('--weight_path', type=str, default='./weights/PPO')
+training_group.add_argument('--weight_path', type=str, default='./weights/PPO_lag')
 training_group.add_argument('--load_dir', type=str, default='')
 training_group.add_argument('--buffer_dir', type=str, default='')
+training_group.add_argument('--cost_limit',type=int,default=25)
 
 
 #-------------------------------------------------------------------------------------------------#
@@ -49,6 +52,8 @@ for _ in range(2):
 
 lr_actor                                = args.lr_actor
 lr_critic                               = args.lr_critic
+lr_cost_critic                          = args.lr_cost_critic
+lr_penalty                              = args.lr_penalty
 epoch_ppo                               = args.epoch_ppo
 clip_eps                                = args.clip_eps
 lambd                                   = args.lambd
@@ -64,3 +69,4 @@ max_episode_length                      = args.max_episode_length
 weight_path                             = args.weight_path
 load_dir                                = args.load_dir
 buffer_dir                              = args.buffer_dir
+cost_limit                              = args.cost_limit
