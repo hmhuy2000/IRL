@@ -22,11 +22,13 @@ agent:
     critic_target_update_frequency: 2
     batch_size: 256
     learnable_temperature: true
-    cost_limit: 15
+    cost_limit: 25
     max_episode_len: 1000
     risk_level: ${risk_level}
     damp_scale: 10
     lr_scale: 1
+    log_frequency: 5000
+
 
 double_q_critic:
   class: agent.critic.DoubleQCritic

@@ -41,6 +41,7 @@ class WCSACAgent(Agent):
         risk_level,
         damp_scale,
         lr_scale,
+        log_frequency
     ):
         super().__init__()
 
@@ -64,6 +65,7 @@ class WCSACAgent(Agent):
         self.pdf_cdf = self.pdf_cdf.cuda()
         self.damp_scale = damp_scale
         self.cost_lr_scale = lr_scale
+        self.log_frequency = log_frequency
 
         # Reward critic
         self.critic = hydra.utils.instantiate(critic_cfg).to(self.device)
@@ -183,7 +185,7 @@ class WCSACAgent(Agent):
         self.all_critics_optimizer.zero_grad()
         total_loss.backward()
         self.all_critics_optimizer.step()
-        if (step%1000==0):
+        if (step%self.log_frequency==0):
             log_info['train/actor_variance']=torch.mean(self.actor.outputs["std"])
             log_info['train/critic_loss']=critic_loss
             log_info['train/safety_critic_loss']=safety_critic_loss
@@ -218,7 +220,7 @@ class WCSACAgent(Agent):
             - actor_Q
             + (self.beta.detach() - damp) * (actor_QC + self.pdf_cdf.cuda() * torch.sqrt(actor_VC))
         )
-        if (step%1000==0):
+        if (step%self.log_frequency==0):
             log_info['train/actor_loss']=actor_loss
             log_info['train/actor_entropy']=-log_prob.mean()
             log_info['train/actor_cost']=torch.mean(actor_QC + self.pdf_cdf.cuda() * torch.sqrt(actor_VC))
@@ -240,7 +242,7 @@ class WCSACAgent(Agent):
             beta_loss.backward()
             self.log_beta_optimizer.step()
             
-            if (step%1000==0):
+            if (step%self.log_frequency==0):
                 log_info['train/alpha_loss']=alpha_loss
                 log_info['train/alpha_value']=self.alpha
                 log_info['train/beta_loss']=beta_loss

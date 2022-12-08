@@ -3,7 +3,7 @@ from PPO.PPO_lag_continuous import *
 import gym
 import safety_gym
 import sys
-from tqdm import trange
+from tqdm import trange,tqdm
 import wandb
 import matplotlib.pyplot as plt
 
@@ -20,7 +20,7 @@ def evaluate(algo, env, step_idx,log_info):
     mean_return = 0.0
     mean_cost = 0.0
 
-    for _ in range(num_eval_episodes):
+    for _ in tqdm(range(num_eval_episodes)):
         state = env.reset()
         episode_return = 0.0
         episode_cost = 0.0

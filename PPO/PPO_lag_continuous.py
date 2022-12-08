@@ -37,7 +37,7 @@ def calculate_gae_cost(values, rewards, dones, next_values, gamma, lambd):
     for t in reversed(range(rewards.size(0) - 1)):
         gaes[t] = deltas[t] + gamma * lambd * (1 - dones[t]) * gaes[t + 1]
 
-    return gaes + values, (gaes - gaes.mean()) #/ (gaes.std() + 1e-8)
+    return gaes + values, (gaes - gaes.mean())#/ (gaes.std() + 1e-8)
 
 class PPO_continuous(Algorithm):
     def __init__(self, state_shape, action_shape, device, seed, gamma,
@@ -102,7 +102,7 @@ class PPO_continuous(Algorithm):
         return step % self.rollout_length == 0
 
     def get_penalty(self):
-        return F.softplus(self.penalty_param)
+        return F.softplus(self.penalty_param)#.item()
 
     def step(self, env, state, t):
         t += 1
@@ -143,7 +143,6 @@ class PPO_continuous(Algorithm):
         cost_targets, cost_gaes = calculate_gae_cost(
             cost_values, costs, dones, next_cost_values, self.gamma, self.lambd)
         current_cost = np.mean(self.return_cost)
-        # penalty_param = self.get_penalty()
         cost_deviation = (current_cost - self.cost_limit)
         loss_penalty = -self.penalty_param*cost_deviation
         self.optim_penalty.zero_grad()
@@ -156,7 +155,6 @@ class PPO_continuous(Algorithm):
             self.update_actor(states, actions, log_pis, gaes,cost_gaes, log_info)
 
         log_info['loss/penalty_loss'] = loss_penalty.item()
-        log_info['PPO-stats/penalty_param'] = self.penalty_param.item()
         log_info['environment/rewards_mean'] = np.mean(self.rewards)
         log_info['environment/rewards_max'] = np.max(self.rewards)
         log_info['environment/rewards_min'] = np.min(self.rewards)
@@ -237,23 +235,23 @@ class PPO_continuous(Algorithm):
         loss_cost = ratios * cost_gaes
         loss_cost = loss_cost.mean()
 
-        penalty = self.get_penalty()
+        penalty = self.get_penalty().item()
 
-        final_actor_loss  = loss_actor - penalty*loss_cost
+        final_actor_loss  = loss_actor - self.coef_ent * entropy + penalty*loss_cost 
         final_actor_loss = final_actor_loss/(1+penalty)
-        final_actor_loss = -final_actor_loss
 
         self.optim_actor.zero_grad()
-        (loss_actor - self.coef_ent * entropy).backward(retain_graph=False)
+        (final_actor_loss).backward(retain_graph=False)
         nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
         self.optim_actor.step()
 
         if self.learning_steps_ppo % self.epoch_ppo == 0:
             log_info['loss/PPO-actor'] = loss_actor.item()
-            log_info['loss/PPO-actor-cost-loss'] = - penalty*loss_cost.item()
+            log_info['loss/PPO-actor-cost-loss'] = penalty*loss_cost.item()
             log_info['loss/PPO-actor-final-loss'] = final_actor_loss.item()
             log_info['PPO-stats/entropy'] = entropy.item()
             log_info['PPO-stats/KL'] = approx_kl
+            log_info['PPO-stats/penalty'] = penalty
             log_info['PPO-stats/relative_policy_entropy'] = entropy.item()/self.max_entropy
             log_info['PPO-network/advantage_max'] = torch.max(gaes).cpu().detach().numpy()
             log_info['PPO-network/advantage_min'] = torch.min(gaes).cpu().detach().numpy()

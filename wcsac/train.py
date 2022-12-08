@@ -7,7 +7,7 @@ sys.path.append('..')
 from video import VideoRecorder
 from logger import Logger
 from replay_buffer import ReplayBuffer
-from buffer import RolloutBufferwithCost
+from buffer import RolloutBufferwithCost_WCSAC
 import utils
 
 import hydra
@@ -27,9 +27,12 @@ class Workspace(object):
 
         self.cfg = cfg
 
+        env_split = cfg.env.split("_")
+        env_name = f"Safexp-{env_split[0].capitalize()}{env_split[1].capitalize()}{env_split[-1]}-v0"
+
         if (cfg.wandb_logs):
             print('---------------------using Wandb---------------------')
-            wandb.init(project=cfg.env, settings=wandb.Settings(_disable_stats=True), \
+            wandb.init(project=env_name, settings=wandb.Settings(_disable_stats=True), \
             group='WCSAC', name=f'{cfg.seed}', entity='hmhuy')
         else:
             print('----------------------no Wandb-----------------------')
@@ -51,7 +54,7 @@ class Workspace(object):
         state_shape = self.env.observation_space.shape
         action_shape = self.env.action_space.shape
 
-        self.replay_buffer = RolloutBufferwithCost(
+        self.replay_buffer = RolloutBufferwithCost_WCSAC(
         buffer_size=int(cfg.replay_buffer_capacity),
         state_shape=state_shape,
         action_shape=action_shape,
@@ -110,11 +113,11 @@ class Workspace(object):
         mean_cost /= self.cfg.num_eval_episodes
         mean_goals_met /= self.cfg.num_eval_episodes
         mean_hazard_touches /= self.cfg.num_eval_episodes
-        log_info['eval/return'] = mean_reward
-        log_info['eval/cost'] = mean_cost
-        log_info['eval/goals_met'] = mean_goals_met
-        log_info['eval/hazard_touches'] = mean_hazard_touches
-        log_info['eval/cost_limit_violations'] = cost_limit_violations
+        log_info['validation/return'] = mean_reward
+        log_info['validation/cost'] = mean_cost
+        # log_info['validation/goals_met'] = mean_goals_met
+        # log_info['validation/hazard_touches'] = mean_hazard_touches
+        # log_info['validation/cost_limit_violations'] = cost_limit_violations
         
 
         self.agent.save(self.work_dir)
@@ -131,7 +134,7 @@ class Workspace(object):
                 if (self.step > 0 and self.step % self.cfg.eval_frequency == 0):
                     self.evaluate(log_info=log_info)
 
-                log_info['train/episode_reward'] = ep_reward
+                log_info['train/episode_return'] = ep_reward
                 log_info['train/episode_cost'] = ep_cost
                 if self.step > 0:
                     log_info['train/cost_rate'] = total_cost / self.step
@@ -163,7 +166,6 @@ class Workspace(object):
             ep_reward += reward
             ep_cost += cost
             total_cost += cost
-            # self.replay_buffer.add(obs, action, reward, cost, next_obs, done, done_no_max)
             self.replay_buffer.append(obs, action, reward, cost,done_no_max, next_obs)
             obs = next_obs
             ep_step += 1
