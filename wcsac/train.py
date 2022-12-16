@@ -54,6 +54,7 @@ class Workspace(object):
         state_shape = self.env.observation_space.shape
         action_shape = self.env.action_space.shape
 
+
         self.replay_buffer = RolloutBufferwithCost_WCSAC(
         buffer_size=int(cfg.replay_buffer_capacity),
         state_shape=state_shape,

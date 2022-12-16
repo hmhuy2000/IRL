@@ -85,8 +85,9 @@ class WCSACAgent(Agent):
         self.log_alpha.requires_grad = True
 
         # Cost temperature (kappa in the paper)
-        self.log_beta = torch.tensor(np.log(np.clip(init_temperature, 1e-8, 1e8))).to(self.device)
-        self.log_beta.requires_grad = True
+        # self.log_beta = torch.tensor(np.log(np.clip(init_temperature, 1e-8, 1e8))).to(self.device)
+        # self.log_beta.requires_grad = True
+        self.beta_network = utils.mlp(obs_dim + action_dim, 256, 1, 2).to(self.device)
 
         # Set target entropy to -|A|
         self.target_entropy = -action_dim
@@ -109,7 +110,7 @@ class WCSACAgent(Agent):
         self.log_alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=alpha_lr, betas=alpha_betas)
 
         # Beta (safety weight) optimizer
-        self.log_beta_optimizer = torch.optim.Adam([self.log_beta], lr=alpha_lr * self.cost_lr_scale, betas=alpha_betas)
+        self.beta_optimizer = torch.optim.Adam(self.beta_network.parameters(), lr=critic_lr, betas=alpha_betas)
 
         self.train()
         self.critic_target.train()
@@ -125,9 +126,9 @@ class WCSACAgent(Agent):
     def alpha(self):
         return self.log_alpha.exp()
 
-    @property
-    def beta(self):
-        return self.log_beta.exp()
+    # @property
+    # def beta(self):
+    #     return self.log_beta.exp()
 
     def act(self, obs, sample=False):
         obs = torch.FloatTensor(obs).to(self.device)
@@ -215,10 +216,11 @@ class WCSACAgent(Agent):
         damp = self.damp_scale * torch.mean(self.target_cost - cvar)
 
         # Actor Loss
+        tmp_beta = F.sigmoid(self.beta_network(torch.cat([obs, action], dim=-1))).detach()
         actor_loss = torch.mean(
             self.alpha.detach() * log_prob
             - actor_Q
-            + (self.beta.detach() - damp) * (actor_QC + self.pdf_cdf.cuda() * torch.sqrt(actor_VC))
+            + (tmp_beta - damp) * (actor_QC + self.pdf_cdf.cuda() * torch.sqrt(actor_VC))
         )
         if (step%self.log_frequency==0):
             log_info['train/actor_loss']=actor_loss
@@ -237,16 +239,22 @@ class WCSACAgent(Agent):
             alpha_loss.backward()
             self.log_alpha_optimizer.step()
 
-            self.log_beta_optimizer.zero_grad()
-            beta_loss = torch.mean(self.beta * (self.target_cost - cvar).detach())
+            self.beta_optimizer.zero_grad()
+            beta = F.sigmoid(self.beta_network(torch.cat([obs, action_taken], dim=-1)))
+            beta_loss = -torch.mean(beta * (self.target_cost - cvar).detach())
             beta_loss.backward()
-            self.log_beta_optimizer.step()
+            self.beta_optimizer.step()
             
             if (step%self.log_frequency==0):
+                log_info['train/distance_mean']=(self.target_cost - cvar).mean()
+                log_info['train/distance_max']=(self.target_cost - cvar).max()
+                log_info['train/distance_min']=(self.target_cost - cvar).min()
                 log_info['train/alpha_loss']=alpha_loss
                 log_info['train/alpha_value']=self.alpha
                 log_info['train/beta_loss']=beta_loss
-                log_info['train/beta_value']=self.beta
+                log_info['train/beta_value_mean']=torch.mean(beta)
+                log_info['train/beta_value_max']=torch.max(beta)
+                log_info['train/beta_value_min']=torch.min(beta)
 
     def update(self, replay_buffer, log_info, step):
         (
