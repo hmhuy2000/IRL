@@ -107,6 +107,7 @@ class PPO_continuous(Algorithm):
         self.target_cost = (
             self.cost_limit * (1 - self.gamma**self.max_episode_length) / (1 - self.gamma) / self.max_episode_length
         )
+        self.target_kl = 0.15
         print(f'target cost: {self.target_cost}')
 
     def is_update(self,step):
@@ -156,33 +157,38 @@ class PPO_continuous(Algorithm):
             cost_values, costs, dones, next_cost_values, self.gamma, self.lambd)
         current_cost = cost_targets
         cost_deviation = self.target_cost - current_cost
-        for _ in range(10):
-            penalty = F.sigmoid(self.penalty_network(states=states,actions=actions))
+
+        for _ in range(self.epoch_ppo):
+            self.learning_steps_ppo += 1
+            self.update_critic(states, targets, cost_targets, log_info)
+        
+        app_kl = 0.0
+        for _ in range(self.epoch_ppo):
+            self.learning_steps_ppo += 1
+            if (app_kl<self.target_kl):
+                app_kl = self.update_actor(states, actions, log_pis, gaes,cost_gaes, log_info)
+
+        for _ in range(1):
+            penalty = F.softplus(self.penalty_network(states=states,actions=actions))
             loss_penalty = (penalty*cost_deviation).mean()
             self.optim_penalty.zero_grad()
             loss_penalty.backward()
             nn.utils.clip_grad_norm_(self.penalty_network.parameters(), self.max_grad_norm)
             self.optim_penalty.step()
 
-        for _ in range(self.epoch_ppo):
-            self.learning_steps_ppo += 1
-            self.update_critic(states, targets, cost_targets, log_info)
-            self.update_actor(states, actions, log_pis, gaes,cost_gaes, log_info)
-
         log_info['loss/penalty_loss'] = loss_penalty.item()
         log_info['environment/total_cost_deviation'] = torch.mean(cost_deviation)
-        # log_info['environment/cost_deviation'] = np.mean(cost_deviation)
-        log_info['environment/cost_target_mean'] = torch.mean(cost_targets)
-        log_info['environment/cost_target_max'] = torch.max(cost_targets)
-        log_info['environment/cost_target_min'] = torch.min(cost_targets)
-        log_info['environment/rewards_mean'] = np.mean(self.rewards)
-        log_info['environment/rewards_max'] = np.max(self.rewards)
-        log_info['environment/rewards_min'] = np.min(self.rewards)
-        log_info['environment/cost_mean'] = np.mean(self.costs)
-        log_info['environment/cost_max'] = np.max(self.costs)
-        log_info['environment/cost_min'] = np.min(self.costs)
-        log_info['environment/return_cost'] = np.std(self.return_cost)
-        log_info['environment/return_reward'] = np.std(self.return_reward)
+        # log_info['environment/cost_target_mean'] = torch.mean(cost_targets)
+        # log_info['environment/cost_target_max'] = torch.max(cost_targets)
+        # log_info['environment/cost_target_min'] = torch.min(cost_targets)
+        # log_info['environment/rewards_mean'] = np.mean(self.rewards)
+        # log_info['environment/rewards_max'] = np.max(self.rewards)
+        # log_info['environment/rewards_min'] = np.min(self.rewards)
+        # log_info['environment/cost_mean'] = np.mean(self.costs)
+        # log_info['environment/cost_max'] = np.max(self.costs)
+        # log_info['environment/cost_min'] = np.min(self.costs)
+        log_info['environment/return_cost'] = np.mean(self.return_cost)
+        log_info['environment/return_reward'] = np.mean(self.return_reward)
         self.rewards = []
         self.costs = []
 
@@ -205,7 +211,7 @@ class PPO_continuous(Algorithm):
         if self.learning_steps_ppo % self.epoch_ppo == 0:
             var_1 = np.std((targets - self.critic(states)).cpu().detach().numpy())
             var_2 = np.std(targets.cpu().detach().numpy())
-            value_function = self.critic(states)
+            # value_function = self.critic(states)
 
             log_info['loss/PPO-critic'] = loss_critic.item()
             log_info['loss/PPO-cost-critic'] = loss_cost_critic.item()
@@ -213,13 +219,16 @@ class PPO_continuous(Algorithm):
             log_info['PPO-network/target_value_max'] = torch.max(targets).cpu().detach().numpy()
             log_info['PPO-network/target_value_min'] = torch.min(targets).cpu().detach().numpy()
             log_info['PPO-network/target_value_mean'] = torch.mean(targets).cpu().detach().numpy()
-            log_info['PPO-network/value_max'] = torch.max(value_function).cpu().detach().numpy()
-            log_info['PPO-network/value_min'] = torch.min(value_function).cpu().detach().numpy()
-            log_info['PPO-network/value_mean'] = torch.mean(value_function).cpu().detach().numpy()
+            log_info['PPO-network/target_cost_max'] = torch.max(cost_targets).cpu().detach().numpy()
+            log_info['PPO-network/target_cost_min'] = torch.min(cost_targets).cpu().detach().numpy()
+            log_info['PPO-network/target_cost_mean'] = torch.mean(cost_targets).cpu().detach().numpy()
+            # log_info['PPO-network/value_max'] = torch.max(value_function).cpu().detach().numpy()
+            # log_info['PPO-network/value_min'] = torch.min(value_function).cpu().detach().numpy()
+            # log_info['PPO-network/value_mean'] = torch.mean(value_function).cpu().detach().numpy()
 
-            log_info['environment/env_length_mean'] = np.mean(self.env_length)
-            log_info['environment/env_length_max'] = np.max(self.env_length)
-            log_info['environment/env_length_min'] = np.min(self.env_length)
+            # log_info['environment/env_length_mean'] = np.mean(self.env_length)
+            # log_info['environment/env_length_max'] = np.max(self.env_length)
+            # log_info['environment/env_length_min'] = np.min(self.env_length)
 
             self.env_length = []
 
@@ -230,34 +239,40 @@ class PPO_continuous(Algorithm):
         self.max_entropy = max(self.max_entropy,entropy.item())
         approx_kl = (log_pis_old - log_pis).mean().item()
         ratios = (log_pis - log_pis_old).exp_()
-        loss_actor1 = -ratios * gaes
+
+        penalty = F.softplus(self.penalty_network(states=states,actions=actions)).detach()
+        total_gae = gaes - penalty * cost_gaes
+        total_gae = total_gae/(1+penalty.mean())
+
+        loss_actor1 = -ratios * total_gae
         loss_actor2 = -torch.clamp(
             ratios,
             1.0 - self.clip_eps,
             1.0 + self.clip_eps
-        ) * gaes
+        ) * total_gae
         loss_actor = torch.max(loss_actor1, loss_actor2).mean()
 
         loss_cost = ratios * cost_gaes
-        penalty = F.sigmoid(self.penalty_network(states=states,actions=actions)).detach()
         loss_cost = (penalty*loss_cost).mean()
 
 
-        final_actor_loss  = loss_actor - self.coef_ent * entropy + loss_cost
-        final_actor_loss = final_actor_loss/(1+penalty.mean())
+        final_actor_loss  = loss_actor - self.coef_ent * entropy #+ loss_cost
+        final_actor_loss = final_actor_loss#/(1+penalty.mean())
 
         self.optim_actor.zero_grad()
         (final_actor_loss).backward(retain_graph=False)
         nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
         self.optim_actor.step()
 
-        if self.learning_steps_ppo % self.epoch_ppo == 0:
+        if approx_kl>=self.target_kl or self.learning_steps_ppo % self.epoch_ppo == 0:
             log_info['loss/PPO-actor'] = loss_actor.item()
             log_info['loss/PPO-actor-cost-loss'] = loss_cost.item()
             log_info['loss/PPO-actor-final-loss'] = final_actor_loss.item()
             log_info['PPO-stats/entropy'] = entropy.item()
             log_info['PPO-stats/KL'] = approx_kl
-            log_info['PPO-stats/penalty'] = penalty.mean()
+            log_info['PPO-stats/penalty_mean'] = penalty.mean()
+            log_info['PPO-stats/penalty_min'] = penalty.min()
+            log_info['PPO-stats/penalty_max'] = penalty.max()
             log_info['PPO-stats/relative_policy_entropy'] = entropy.item()/self.max_entropy
             log_info['PPO-network/advantage_max'] = torch.max(gaes).cpu().detach().numpy()
             log_info['PPO-network/advantage_min'] = torch.min(gaes).cpu().detach().numpy()
@@ -267,6 +282,8 @@ class PPO_continuous(Algorithm):
             log_info['PPO-network/advantage_cost_min'] = torch.min(cost_gaes).cpu().detach().numpy()
             log_info['PPO-network/advantage_cost_mean'] = torch.mean(cost_gaes).cpu().detach().numpy()
             
+        return approx_kl
+
     def save_models(self,save_dir):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)

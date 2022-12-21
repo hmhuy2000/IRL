@@ -13,8 +13,7 @@ from PPO.parameter import *
 def Wandb_logging(diction, step_idx, wandb_logs):
     if (wandb_logs):
         wandb.log(diction, step = step_idx)
-    else:
-        print(f'[INFO] {diction} step {step_idx}')
+    print(f'[INFO] {diction} step {step_idx}')
 
 def evaluate(algo, env, step_idx,log_info):
     mean_return = 0.0
