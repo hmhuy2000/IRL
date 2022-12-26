@@ -321,3 +321,9 @@ class PPO_continuous(Algorithm):
 
     def copyNetworksFrom(self,algo):
         self.actor.load_state_dict(algo.actor.state_dict())
+
+    def share_memory(self):
+        self.actor.share_memory()
+        self.critic.share_memory()
+        self.cost_critic.share_memory()
+        self.penalty_network.share_memory()

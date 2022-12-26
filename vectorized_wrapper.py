@@ -43,6 +43,7 @@ class VectorizedWrapper(object):
         self.waiting = False
         self.closed = False
         num_envs = len(envs)
+        self.num_steps = envs[0].num_steps
 
         self.remotes, self.worker_remotes = zip(*[Pipe() for _ in range(num_envs)])
         self.processes = [Process(target=worker, args=(worker_remote, remote, env))
