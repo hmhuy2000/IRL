@@ -18,14 +18,14 @@ class Algorithm(ABC):
     def explore(self,state):
         state = torch.tensor(state, dtype=torch.float, device=self.device)
         with torch.no_grad():
-            action,log_pi = self.actor.sample(state.unsqueeze_(0))
-        return action.cpu().numpy()[0],log_pi.item()
+            action,log_pi = self.actor.sample(state)
+        return action.cpu().numpy(),log_pi.cpu().numpy()
 
     def exploit(self,state):
         state = torch.tensor(state, dtype=torch.float, device=self.device)
         with torch.no_grad():
-            action = self.actor(state.unsqueeze_(0))
-        return action.cpu().numpy()[0]
+            action = self.actor(state)
+        return action.cpu().numpy()
 
     @abstractmethod
     def is_update(self,step):

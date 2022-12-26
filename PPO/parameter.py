@@ -25,13 +25,14 @@ training_group.add_argument('--max_grad_norm', type=float, default=10.0)
 training_group.add_argument('--wandb_logs', type=bool, default=False)
 training_group.add_argument('--num_training_step',type=int,default=int(1e7))
 training_group.add_argument('--eval_interval',type=int,default=int(25000))
-training_group.add_argument('--num_eval_episodes',type=int,default=25)
+training_group.add_argument('--num_eval_episodes',type=int,default=30)
 training_group.add_argument('--max_episode_length',type=int,default=None)
 training_group.add_argument('--reward_factor',type=float,default=1.0)
 training_group.add_argument('--weight_path', type=str, default='./weights/PPO_lag')
 training_group.add_argument('--load_dir', type=str, default='')
 training_group.add_argument('--buffer_dir', type=str, default='')
 training_group.add_argument('--cost_limit',type=int,default=25)
+training_group.add_argument('--num_envs',type=int,default=2)
 
 
 #-------------------------------------------------------------------------------------------------#
@@ -70,3 +71,4 @@ weight_path                             = args.weight_path
 load_dir                                = args.load_dir
 buffer_dir                              = args.buffer_dir
 cost_limit                              = args.cost_limit
+num_envs                                = args.num_envs

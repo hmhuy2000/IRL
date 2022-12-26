@@ -43,7 +43,7 @@ class PPO_continuous(Algorithm):
     def __init__(self, state_shape, action_shape, device, seed, gamma,
         buffer_size, mix, hidden_units_actor, hidden_units_critic,
         lr_actor, lr_critic,lr_cost_critic,lr_penalty, epoch_ppo, clip_eps, lambd, coef_ent, 
-        max_grad_norm,reward_factor,max_episode_length,cost_limit):
+        max_grad_norm,reward_factor,max_episode_length,cost_limit,num_envs):
         super().__init__(state_shape, action_shape, device, seed, gamma)
 
         # Rollout buffer.
@@ -101,13 +101,17 @@ class PPO_continuous(Algorithm):
         self.max_episode_length = max_episode_length
         self.rewards = []
         self.costs = []
-        self.return_cost = [0]
-        self.return_reward = [0]
+        self.return_cost = []
+        self.return_reward = []
         self.cost_limit = cost_limit
+        self.num_envs = num_envs
         self.target_cost = (
             self.cost_limit * (1 - self.gamma**self.max_episode_length) / (1 - self.gamma) / self.max_episode_length
         )
         self.target_kl = 0.15
+        self.tmp_buffer = [[] for _ in range(self.num_envs)]
+        self.tmp_return_cost = [0 for _ in range(self.num_envs)]
+        self.tmp_return_reward = [0 for _ in range(self.num_envs)]
         print(f'target cost: {self.target_cost}')
 
     def is_update(self,step):
@@ -116,25 +120,36 @@ class PPO_continuous(Algorithm):
     def step(self, env, state, t):
         t += 1
         action, log_pi = self.explore(state)
-        next_state, reward, done, info  = env.step(action)
-        c = info['cost']
-        self.return_cost[-1] += c
-        self.return_reward[-1] += reward
-        mask = False if t >= self.max_episode_length else done
-        self.buffer.append(state, action, reward * self.reward_factor, c, mask, log_pi, next_state)
-        self.rewards.append(reward * self.reward_factor)
-        self.costs.append(c)
-        if (self.max_episode_length and t>=self.max_episode_length):
-            done = True
-        if done:
-            self.env_length.append(t)
-            t = 0
+        next_state, reward, done, c  = env.step(action)
+        for idx in range(self.num_envs):
+            mask = False if t >= self.max_episode_length else done[idx]
+            self.tmp_buffer[idx].append((state[idx], action[idx], reward[idx] * self.reward_factor,
+            c[idx], mask, log_pi[idx], next_state[idx]))
+        
+            self.rewards.append(reward[idx] * self.reward_factor)
+            self.costs.append(c[idx])
+            self.tmp_return_cost[idx] += c[idx]
+            self.tmp_return_reward[idx] += reward[idx]
+
+            if (self.max_episode_length and t>=self.max_episode_length):
+                done[idx] = True
+            if done[idx]:
+                for (tmp_state,tmp_action,tmp_reward,tmp_c,tmp_mask,tmp_log_pi,tmp_next_state) in self.tmp_buffer[idx]:
+                    self.buffer.append(tmp_state, tmp_action, tmp_reward, tmp_c, tmp_mask, tmp_log_pi, tmp_next_state)
+                self.tmp_buffer[idx] = []
+
+                self.env_length.append(t)
+                if (len(self.return_cost)>=100):
+                    self.return_cost = self.return_cost[1:]
+                    self.return_reward = self.return_reward[1:]
+                self.return_cost.append(self.tmp_return_cost[idx])
+                self.return_reward.append(self.tmp_return_reward[idx])
+                self.tmp_return_cost[idx] = 0
+                self.tmp_return_reward[idx] = 0
+
+        if done[0]:
             next_state = env.reset()
-            if (len(self.return_cost)>=100):
-                self.return_cost = self.return_cost[1:]
-                self.return_reward = self.return_reward[1:]
-            self.return_cost.append(0)
-            self.return_reward.append(0)
+            t = 0
         return next_state, t
 
     def update(self,log_info):
@@ -303,3 +318,6 @@ class PPO_continuous(Algorithm):
             raise
         self.actor.load_state_dict(torch.load(f'{load_dir}/actor.pth'))
         self.critic.load_state_dict(torch.load(f'{load_dir}/critic.pth'))
+
+    def copyNetworksFrom(self,algo):
+        self.actor.load_state_dict(algo.actor.state_dict())

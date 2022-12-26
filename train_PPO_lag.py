@@ -6,8 +6,11 @@ import sys
 from tqdm import trange,tqdm
 import wandb
 import matplotlib.pyplot as plt
+from copy import deepcopy
+import threading
 
 from PPO.parameter import *
+from vectorized_wrapper import VectorizedWrapper
 
 
 def Wandb_logging(diction, step_idx, wandb_logs):
@@ -15,52 +18,53 @@ def Wandb_logging(diction, step_idx, wandb_logs):
         wandb.log(diction, step = step_idx)
     print(f'[INFO] {diction} step {step_idx}')
 
-def evaluate(algo, env, step_idx,log_info):
+def evaluate(algo, env,max_episode_length,max_eval_return,log_cnt):
     mean_return = 0.0
     mean_cost = 0.0
+    log_info = {}
 
-    for _ in tqdm(range(num_eval_episodes)):
+    for _ in range(num_eval_episodes//num_envs):
         state = env.reset()
         episode_return = 0.0
         episode_cost = 0.0
-        done = False
-        t = 0
-        while (not done):
-            t += 1
+        for _ in trange(max_episode_length):
             action = algo.exploit(state)
-            state, reward, done, info = env.step(action)
-            episode_return += reward
-            episode_cost += info['cost']
-            if (t >= env.num_steps):
-                break
+            state, reward, done, cost = env.step(action)
+            episode_return += np.sum(reward)
+            episode_cost += np.sum(cost)
             
-        mean_return += episode_return / num_eval_episodes
-        mean_cost += episode_cost / num_eval_episodes
+        mean_return += episode_return 
+        mean_cost += episode_cost 
+
+    mean_return = mean_return/num_eval_episodes
+    mean_cost = mean_cost/num_eval_episodes
     log_info['validation/return'] = mean_return
     log_info['validation/cost'] = mean_cost
-    return mean_return
+    Wandb_logging(diction=log_info,step_idx=log_cnt,wandb_logs=wandb_logs)
+    if (mean_return > max_eval_return):
+        max_eval_return = mean_return
+        algo.save_models(f'{weight_path}/{env_name}-{mean_return:.2f}')
+    print(f'evaluated = {mean_return:.2f}, maximum return = {max_eval_return:.2f}')
 
 def main_PPO():
-    env = gym.make(env_name,
+    sample_env = gym.make(env_name,
     # render_mode="human",
     )
-    test_env = gym.make(env_name,
-    # render_mode="human",
-    )
-    state_shape=env.observation_space.shape
-    action_shape=env.action_space.shape
-    if ('Box' in f'{type(env.action_space)}'):
-        if (len(action_shape) == 0):
-            action_shape = (1,)
-    else:
-        # TODO: change action space, only for CartPole
-        action_shape = (2,)
+    
+    env = [gym.make(env_name,) for _ in range(num_envs)]
+    env = VectorizedWrapper(env)
+
+    test_env = [gym.make(env_name,) for _ in range(num_envs)]
+    test_env = VectorizedWrapper(test_env)
+    state_shape=sample_env.observation_space.shape
+    action_shape=sample_env.action_space.shape
+
 
 
     if (wandb_logs):
         print('---------------------using Wandb---------------------')
         wandb.init(project=env_name, settings=wandb.Settings(_disable_stats=True), \
-        group='PPO-lag', name=f'{seed}', entity='hmhuy')
+        group='PPO-lag-vectorized', name=f'{seed}', entity='hmhuy')
     else:
         print('----------------------no Wandb-----------------------')
 
@@ -70,27 +74,34 @@ def main_PPO():
             hidden_units_critic=hidden_units_critic,
             lr_actor=lr_actor,lr_critic=lr_critic,lr_cost_critic=lr_cost_critic,lr_penalty=lr_penalty, epoch_ppo=epoch_ppo,
             clip_eps=clip_eps, lambd=lambd, coef_ent=coef_ent,
-            max_grad_norm=max_grad_norm,reward_factor=reward_factor,max_episode_length=env.num_steps,
-            cost_limit=cost_limit)
+            max_grad_norm=max_grad_norm,reward_factor=reward_factor,max_episode_length=sample_env.num_steps,
+            cost_limit=cost_limit,num_envs=num_envs)
+
+    eval_algo = deepcopy(algo)
+
     if not os.path.exists(weight_path):
         os.makedirs(weight_path)
         
     state = env.reset()
-    t = 0
     log_cnt = 0
     eval_return = -np.inf
-    for step in trange(1,num_training_step+1):
+    t = 0
+    eval_thread = None
+    for step in trange(1,num_training_step//num_envs+1):
         state, t = algo.step(env, state, t)
         log_info = {}
 
-        if algo.is_update(step):
+        if algo.is_update(step*num_envs):
                 algo.update(log_info)
                 
-        if step % eval_interval == 0:
-            value = evaluate(algo,test_env,int(step/eval_interval),log_info=log_info)
-            if (value > eval_return):
-                eval_return = value
-                algo.save_models(f'{weight_path}/{env_name}-{eval_return:.2f}')
+        if step % (eval_interval//num_envs) == 0:
+            if eval_thread is not None:
+                eval_thread.join()
+            eval_algo.copyNetworksFrom(algo)
+            eval_algo.eval()
+            eval_thread = threading.Thread(target=evaluate, 
+            args=(eval_algo,test_env,sample_env.num_steps,eval_return,log_cnt))
+            eval_thread.start()
 
         if (len(log_info.keys())>0):
             Wandb_logging(diction=log_info, step_idx=log_cnt,wandb_logs=wandb_logs)
