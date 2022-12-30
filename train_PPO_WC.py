@@ -1,4 +1,4 @@
-from PPO.PPO_lag_continuous import *
+from PPO.PPO_WC import *
 
 import gym
 import safety_gym
@@ -13,12 +13,14 @@ from PPO.parameter import *
 from vectorized_wrapper import VectorizedWrapper
 
 
+
 def Wandb_logging(diction, step_idx, wandb_logs):
     if (wandb_logs):
         wandb.log(diction, step = step_idx)
     print(f'[INFO] {diction} step {step_idx}')
 
-def evaluate(algo, env,max_episode_length,max_eval_return,log_cnt):
+def evaluate(algo, env,max_episode_length,log_cnt):
+    global max_eval_return
     mean_return = 0.0
     mean_cost = 0.0
     log_info = {}
@@ -41,10 +43,10 @@ def evaluate(algo, env,max_episode_length,max_eval_return,log_cnt):
     log_info['validation/return'] = mean_return
     log_info['validation/cost'] = mean_cost
     Wandb_logging(diction=log_info,step_idx=log_cnt,wandb_logs=wandb_logs)
-    if (mean_return > max_eval_return):
+    if (mean_cost<cost_limit and mean_return > max_eval_return):
         max_eval_return = mean_return
         algo.save_models(f'{weight_path}/{env_name}-{mean_return:.2f}')
-    print(f'evaluated = {mean_return:.2f}, maximum return = {max_eval_return:.2f}')
+    print(f'evaluated return = {mean_return:.2f},mean cost = {mean_cost:.2f}, maximum valid return = {max_eval_return:.2f}')
 
 def main_PPO():
     sample_env = gym.make(env_name,
@@ -64,7 +66,7 @@ def main_PPO():
     if (wandb_logs):
         print('---------------------using Wandb---------------------')
         wandb.init(project=env_name, settings=wandb.Settings(_disable_stats=True), \
-        group='PPO-lag', name=f'{seed}', entity='hmhuy')
+        group='PPO-WC-test', name=f'{seed}', entity='hmhuy')
     else:
         print('----------------------no Wandb-----------------------')
 
@@ -75,8 +77,7 @@ def main_PPO():
             lr_actor=lr_actor,lr_critic=lr_critic,lr_cost_critic=lr_cost_critic,lr_penalty=lr_penalty, epoch_ppo=epoch_ppo,
             clip_eps=clip_eps, lambd=lambd, coef_ent=coef_ent,
             max_grad_norm=max_grad_norm,reward_factor=reward_factor,max_episode_length=sample_env.num_steps,
-            cost_limit=cost_limit,num_envs=num_envs)
-
+            cost_limit=cost_limit,risk_level=risk_level,num_envs=num_envs)
     eval_algo = deepcopy(algo)
 
     if not os.path.exists(weight_path):
@@ -84,7 +85,6 @@ def main_PPO():
         
     state = env.reset()
     log_cnt = 0
-    eval_return = -np.inf
     t = 0
     eval_thread = None
     for step in trange(1,num_training_step//num_envs+1):
@@ -100,7 +100,7 @@ def main_PPO():
             eval_algo.copyNetworksFrom(algo)
             eval_algo.eval()
             eval_thread = threading.Thread(target=evaluate, 
-            args=(eval_algo,test_env,sample_env.num_steps,eval_return,log_cnt))
+            args=(eval_algo,test_env,sample_env.num_steps,log_cnt))
             eval_thread.start()
 
         if (len(log_info.keys())>0):

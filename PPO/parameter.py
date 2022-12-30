@@ -33,6 +33,7 @@ training_group.add_argument('--load_dir', type=str, default='')
 training_group.add_argument('--buffer_dir', type=str, default='')
 training_group.add_argument('--cost_limit',type=int,default=25)
 training_group.add_argument('--num_envs',type=int,default=2)
+training_group.add_argument('--risk_level',type=float,default=0.1)
 
 
 #-------------------------------------------------------------------------------------------------#
@@ -50,6 +51,8 @@ hidden_units_critic                     = []
 for _ in range(2):
     hidden_units_actor.append(args.hidden_units_actor)
     hidden_units_critic.append(args.hidden_units_critic)
+
+max_eval_return                         = -np.inf
 
 lr_actor                                = args.lr_actor
 lr_critic                               = args.lr_critic
@@ -72,3 +75,4 @@ load_dir                                = args.load_dir
 buffer_dir                              = args.buffer_dir
 cost_limit                              = args.cost_limit
 num_envs                                = args.num_envs
+risk_level                              = args.risk_level

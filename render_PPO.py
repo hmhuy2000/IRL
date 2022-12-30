@@ -1,5 +1,5 @@
 from base_algo import sample_Algorithm
-from PPO.PPO_continuous import *
+from PPO.PPO_WC import *
 # from PPO.PPO_discrete import *
 import gym
 import safety_gym
@@ -12,8 +12,7 @@ from PPO.parameter import *
 def main_PPO():
 
     """
-    python render_PPO.py --env_name=Safexp-PointGoal1-v0 --buffer_size=100000 --seed=0 --hidden_units_actor=128 --hidden_units_critic=128
-     --max_episode_length=1000 --load_dir='./weights/PPO/Safexp-PointGoal1-v0-24.87'
+    python render_PPO.py --env_name=Safexp-PointGoal1-v0 --buffer_size=100000 --seed=0 --hidden_units_actor=128 --hidden_units_critic=128 --max_episode_length=1000 --load_dir='./weights/PPO/Safexp-PointGoal1-v0-24.87'
     """
 
     test_env = gym.make(env_name,
@@ -23,12 +22,13 @@ def main_PPO():
     action_shape=test_env.action_space.shape
 
     algo = PPO_continuous(state_shape=state_shape, action_shape=action_shape,
-        device=device, seed=seed, gamma=gamma,buffer_size=buffer_size,
-        mix=mix, hidden_units_actor=hidden_units_actor,
-        hidden_units_critic=hidden_units_critic,
-        lr_actor=lr_actor,lr_critic=lr_critic, epoch_ppo=epoch_ppo,
-        clip_eps=clip_eps, lambd=lambd, coef_ent=coef_ent,
-        max_grad_norm=max_grad_norm,reward_factor=reward_factor,max_episode_length=test_env.num_steps)
+            device=device, seed=seed, gamma=gamma,buffer_size=buffer_size,
+            mix=mix, hidden_units_actor=hidden_units_actor,
+            hidden_units_critic=hidden_units_critic,
+            lr_actor=lr_actor,lr_critic=lr_critic,lr_cost_critic=lr_cost_critic,lr_penalty=lr_penalty, epoch_ppo=epoch_ppo,
+            clip_eps=clip_eps, lambd=lambd, coef_ent=coef_ent,
+            max_grad_norm=max_grad_norm,reward_factor=reward_factor,max_episode_length=test_env.num_steps,
+            cost_limit=cost_limit,risk_level=risk_level,num_envs=num_envs)
 
     if not os.path.exists(weight_path):
         print('error no path weight existed!')

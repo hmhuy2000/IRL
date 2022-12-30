@@ -30,6 +30,8 @@ def worker(remote, parent_remote, env):
       elif cmd == 'reset':
         obs = env.reset()
         remote.send(obs)
+      elif cmd =='render':
+        env.render()
       elif cmd == 'close':
         remote.close()
         break
@@ -54,6 +56,11 @@ class VectorizedWrapper(object):
             process.start()
         for remote in self.worker_remotes:
             remote.close()
+
+    def render(self):
+        for remote in self.remotes:
+          remote.send(('render',None))
+          return
 
     def reset(self):
         '''
