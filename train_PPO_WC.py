@@ -23,6 +23,8 @@ def evaluate(algo, env,max_episode_length,log_cnt):
     global max_eval_return
     mean_return = 0.0
     mean_cost = 0.0
+    failed_case = []
+    cost_sum = [0 for _ in range(num_envs)]
     log_info = {}
 
     for _ in range(num_eval_episodes//num_envs):
@@ -34,7 +36,11 @@ def evaluate(algo, env,max_episode_length,log_cnt):
             state, reward, done, cost = env.step(action)
             episode_return += np.sum(reward)
             episode_cost += np.sum(cost)
-            
+            for idx in range(num_envs):
+                cost_sum[idx] += cost[idx]
+        for idx in range(num_envs):
+            failed_case.append(cost_sum[idx])
+            cost_sum[idx] = 0
         mean_return += episode_return 
         mean_cost += episode_cost 
 
@@ -42,6 +48,11 @@ def evaluate(algo, env,max_episode_length,log_cnt):
     mean_cost = mean_cost/num_eval_episodes
     log_info['validation/return'] = mean_return
     log_info['validation/cost'] = mean_cost
+    tmp_arr = np.asarray(failed_case)
+    log_info['validation/failure_rate'] = np.sum(tmp_arr>cost_limit)/num_eval_episodes
+    log_info['validation/cost_std'] = np.std(tmp_arr)
+    log_info['validation/cost_max'] = np.max(tmp_arr)
+    log_info['validation/cost_min'] = np.min(tmp_arr)
     Wandb_logging(diction=log_info,step_idx=log_cnt,wandb_logs=wandb_logs)
     if (mean_cost<cost_limit and mean_return > max_eval_return):
         max_eval_return = mean_return
@@ -66,7 +77,7 @@ def main_PPO():
     if (wandb_logs):
         print('---------------------using Wandb---------------------')
         wandb.init(project=env_name, settings=wandb.Settings(_disable_stats=True), \
-        group='PPO-WC-test', name=f'{seed}', entity='hmhuy')
+        group='PPO-WC-0.9', name=f'{seed}', entity='hmhuy')
     else:
         print('----------------------no Wandb-----------------------')
 

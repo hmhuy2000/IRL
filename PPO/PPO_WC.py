@@ -82,7 +82,8 @@ class PPO_continuous(Algorithm):
         self.cost_critic_variance = StateFunction(
             state_shape=state_shape,
             hidden_units=hidden_units_critic,
-            hidden_activation=nn.ReLU()
+            hidden_activation=nn.ReLU(),
+            output_activation=nn.Softplus()
         ).to(device)
 
         self.penalty_network = StateActionFunction(
@@ -94,7 +95,8 @@ class PPO_continuous(Algorithm):
 
         self.optim_actor = Adam(self.actor.parameters(), lr=lr_actor)
         self.optim_critic = Adam(self.critic.parameters(), lr=lr_critic)
-        self.optim_cost_critic = Adam(chain(self.cost_critic.parameters(),self.cost_critic_variance.parameters()), lr=lr_cost_critic)
+        self.optim_cost_critic = Adam(self.cost_critic.parameters(), lr=lr_cost_critic)
+        self.optim_cost_critic_variance = Adam(self.cost_critic_variance.parameters(), lr=lr_cost_critic)
         self.optim_penalty = Adam(self.penalty_network.parameters(), lr=lr_penalty)
 
         self.learning_steps_ppo = 0
@@ -117,7 +119,7 @@ class PPO_continuous(Algorithm):
         self.target_cost = (
             self.cost_limit * (1 - self.gamma**self.max_episode_length) / (1 - self.gamma) / self.max_episode_length
         )
-        self.target_kl = 0.15
+        self.target_kl = 0.2
         self.risk_level = risk_level
         normal = tdist.normal.Normal(torch.tensor([0.0]), torch.tensor([1.0]))
         self.pdf_cdf = (
@@ -178,10 +180,10 @@ class PPO_continuous(Algorithm):
         with torch.no_grad():
             values = self.critic(states)
             cost_values = self.cost_critic(states)         
-            cost_variances = torch.clamp(self.cost_critic_variance(states), min=1e-8, max=1e8) 
+            cost_variances = self.cost_critic_variance(states)#.clamp(min=1e-8, max=1e8) 
             next_values = self.critic(next_states)
             next_cost_values = self.cost_critic(next_states) 
-            next_cost_variances = torch.clamp(self.cost_critic_variance(next_states), min=1e-8, max=1e8) 
+            next_cost_variances =self.cost_critic_variance(next_states)#.clamp(min=1e-8, max=1e8) 
 
         cvar = cost_values + self.pdf_cdf.cuda() * torch.sqrt(cost_variances)
         next_cvar = next_cost_values + self.pdf_cdf.cuda() * torch.sqrt(next_cost_variances)
@@ -189,6 +191,8 @@ class PPO_continuous(Algorithm):
         targets, gaes = calculate_gae(
             values, rewards, dones, next_values, self.gamma, self.lambd)
         cost_targets, cost_gaes = calculate_gae_cost(
+            cost_values, costs, dones, next_cost_values, self.gamma, self.lambd)
+        cost_cvar_targets, cost_cvar_gaes = calculate_gae_cost(
             cvar, costs, dones, next_cvar, self.gamma, self.lambd)
 
         target_cost_variances = (
@@ -198,9 +202,14 @@ class PPO_continuous(Algorithm):
             + self.gamma**2 * next_cost_variances
             + self.gamma**2 * next_cost_values**2
         )
-        target_cost_variances = torch.clamp(target_cost_variances.detach(), min=1e-8, max=1e8)
+        target_cost_variances = target_cost_variances.detach().clamp(min=1e-8, max=1e8) 
+        print('------------------------------------')
+        print(cost_values.mean().item(),cost_targets.mean().item())
+        print(cvar.mean().item(),cost_cvar_targets.mean().item())
+        print(cost_variances.mean().item(),target_cost_variances.mean().item())
+        print('------------------------------------')
 
-        current_cost = cost_targets
+        current_cost = cost_cvar_targets
         cost_deviation = self.target_cost - current_cost
 
         for _ in range(self.epoch_ppo):
@@ -211,9 +220,9 @@ class PPO_continuous(Algorithm):
         for _ in range(self.epoch_ppo):
             self.learning_steps_ppo += 1
             if (app_kl<self.target_kl):
-                app_kl = self.update_actor(states, actions, log_pis, gaes,cost_gaes, log_info)
+                app_kl = self.update_actor(states, actions, log_pis, gaes,cost_cvar_gaes, log_info)
 
-        for _ in range(3):
+        for _ in range(1):
             penalty = F.softplus(self.penalty_network(states=states,actions=actions))
             loss_penalty = (penalty*cost_deviation).mean()
             self.optim_penalty.zero_grad()
@@ -223,6 +232,10 @@ class PPO_continuous(Algorithm):
 
         log_info['loss/penalty_loss'] = loss_penalty.item()
         log_info['environment/total_cost_deviation'] = torch.mean(cost_deviation)
+        log_info['environment/cost_variance'] = torch.mean(target_cost_variances)
+        log_info['environment/CVaR_mean'] = torch.mean(cost_cvar_targets)
+        log_info['environment/CVaR_max'] = torch.max(cost_cvar_targets)
+        log_info['environment/CVaR_min'] = torch.min(cost_cvar_targets)
         # log_info['environment/cost_target_mean'] = torch.mean(cost_targets)
         # log_info['environment/cost_target_max'] = torch.max(cost_targets)
         # log_info['environment/cost_target_min'] = torch.min(cost_targets)
@@ -241,12 +254,13 @@ class PPO_continuous(Algorithm):
 
     def update_critic(self, states, targets,cost_targets,target_cost_variances, log_info):
         loss_critic = (self.critic(states) - targets).pow_(2).mean()
-        cost_variances = torch.clamp(self.cost_critic_variance(states), min=1e-8, max=1e8) 
+        cost_variances = self.cost_critic_variance(states)#.clamp(min=1e-8, max=1e8) 
         loss_cost_critic_mean = (self.cost_critic(states) - cost_targets).pow_(2).mean()
         loss_cost_critic_variance = (
             cost_variances + target_cost_variances -  2 * torch.sqrt(cost_variances * target_cost_variances)
         ).mean()
-        loss_cost_critic = loss_cost_critic_mean + loss_cost_critic_variance
+        # loss_cost_critic_variance = (cost_variances - target_cost_variances).pow_(2).mean()
+        loss_cost_critic = loss_cost_critic_mean 
         self.optim_critic.zero_grad()
         loss_critic.backward(retain_graph=False)
         nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
@@ -254,8 +268,13 @@ class PPO_continuous(Algorithm):
 
         self.optim_cost_critic.zero_grad()
         loss_cost_critic.backward(retain_graph=False)
-        nn.utils.clip_grad_norm_(chain(self.cost_critic.parameters(),self.cost_critic_variance.parameters()), self.max_grad_norm)
+        nn.utils.clip_grad_norm_(self.cost_critic.parameters(), self.max_grad_norm)
         self.optim_cost_critic.step()
+
+        self.optim_cost_critic_variance.zero_grad()
+        loss_cost_critic_variance.backward(retain_graph=False)
+        nn.utils.clip_grad_norm_(self.cost_critic_variance.parameters(), self.max_grad_norm)
+        self.optim_cost_critic_variance.step()
 
         if self.learning_steps_ppo % self.epoch_ppo == 0:
             var_1 = np.std((targets - self.critic(states)).cpu().detach().numpy())
@@ -264,7 +283,7 @@ class PPO_continuous(Algorithm):
 
             log_info['loss/PPO-critic'] = loss_critic.item()
             log_info['loss/PPO-cost-critic'] = loss_cost_critic.item()
-            log_info['loss/PPO-cost-critic_mean'] = loss_cost_critic_mean.item()
+            # log_info['loss/PPO-cost-critic_mean'] = loss_cost_critic_mean.item()
             log_info['loss/PPO-cost-critic_variance'] = loss_cost_critic_variance.item()
             log_info['PPO-stats/residual_variance'] = var_1/var_2
             log_info['PPO-network/target_value_max'] = torch.max(targets).cpu().detach().numpy()
@@ -291,7 +310,7 @@ class PPO_continuous(Algorithm):
         approx_kl = (log_pis_old - log_pis).mean().item()
         ratios = (log_pis - log_pis_old).exp_()
 
-        penalty = F.softplus(self.penalty_network(states=states,actions=actions)).detach()#.clamp(0,20)
+        penalty = F.softplus(self.penalty_network(states=states,actions=actions)).detach().clamp(0,100)
         total_gae = gaes - penalty * cost_gaes
         total_gae = total_gae/(penalty+1)
 

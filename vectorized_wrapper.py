@@ -57,11 +57,6 @@ class VectorizedWrapper(object):
         for remote in self.worker_remotes:
             remote.close()
 
-    def render(self):
-        for remote in self.remotes:
-          remote.send(('render',None))
-          return
-
     def reset(self):
         '''
         Reset each environment.

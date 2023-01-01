@@ -7,14 +7,15 @@ from .utils import build_mlp
 class StateFunction(nn.Module):
 
     def __init__(self, state_shape, hidden_units=(64, 64),
-                 hidden_activation=nn.Tanh()):
+                 hidden_activation=nn.Tanh(),output_activation=None):
         super().__init__()
 
         self.net = build_mlp(
             input_dim=state_shape[0],
             output_dim=1,
             hidden_units=hidden_units,
-            hidden_activation=hidden_activation
+            hidden_activation=hidden_activation,
+            output_activation=output_activation
         )
 
     def forward(self, states):
