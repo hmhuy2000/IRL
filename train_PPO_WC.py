@@ -56,7 +56,9 @@ def evaluate(algo, env,max_episode_length,log_cnt):
     Wandb_logging(diction=log_info,step_idx=log_cnt,wandb_logs=wandb_logs)
     if (mean_cost<cost_limit and mean_return > max_eval_return):
         max_eval_return = mean_return
-        algo.save_models(f'{weight_path}/{env_name}-{mean_return:.2f}')
+        if (mean_return>0):
+            algo.save_models(f'{weight_path}/{env_name}-{int(risk_level*100)}-{seed}-{mean_return:.2f}')
+            print(f'save model at {weight_path}/{env_name}-{int(risk_level*100)}-{seed}-{mean_return:.2f}')
     print(f'evaluated return = {mean_return:.2f},mean cost = {mean_cost:.2f}, maximum valid return = {max_eval_return:.2f}')
 
 def main_PPO():
@@ -77,7 +79,7 @@ def main_PPO():
     if (wandb_logs):
         print('---------------------using Wandb---------------------')
         wandb.init(project=env_name, settings=wandb.Settings(_disable_stats=True), \
-        group='PPO-WC-0.9', name=f'{seed}', entity='hmhuy')
+        group=f'PPO-CVaR-1e7-{risk_level}', name=f'{seed}', entity='hmhuy')
     else:
         print('----------------------no Wandb-----------------------')
 

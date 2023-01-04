@@ -125,10 +125,15 @@ class PPO_continuous(Algorithm):
         self.pdf_cdf = (
             normal.log_prob(normal.icdf(torch.tensor(self.risk_level))).exp() / self.risk_level
         ) 
+        print(f'pdf_cdf {self.pdf_cdf}')
+
         self.pdf_cdf = self.pdf_cdf.cuda()
+
         self.tmp_buffer = [[] for _ in range(self.num_envs)]
         self.tmp_return_cost = [0 for _ in range(self.num_envs)]
         self.tmp_return_reward = [0 for _ in range(self.num_envs)]
+        self.total_cost = 0
+        self.num_interact_step = 0
         print(f'target cost: {self.target_cost}')
 
     def is_update(self,step):
@@ -161,6 +166,8 @@ class PPO_continuous(Algorithm):
                     self.return_reward = self.return_reward[1:]
                 self.return_cost.append(self.tmp_return_cost[idx])
                 self.return_reward.append(self.tmp_return_reward[idx])
+                self.total_cost += self.tmp_return_cost[idx]
+                self.num_interact_step += self.max_episode_length
                 self.tmp_return_cost[idx] = 0
                 self.tmp_return_reward[idx] = 0
 
@@ -236,6 +243,7 @@ class PPO_continuous(Algorithm):
         log_info['environment/CVaR_mean'] = torch.mean(cost_cvar_targets)
         log_info['environment/CVaR_max'] = torch.max(cost_cvar_targets)
         log_info['environment/CVaR_min'] = torch.min(cost_cvar_targets)
+        log_info['environment/cost_rate'] = self.total_cost/self.num_interact_step
         # log_info['environment/cost_target_mean'] = torch.mean(cost_targets)
         # log_info['environment/cost_target_max'] = torch.max(cost_targets)
         # log_info['environment/cost_target_min'] = torch.min(cost_targets)
@@ -358,7 +366,6 @@ class PPO_continuous(Algorithm):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         torch.save(self.actor.state_dict(), f'{save_dir}/actor.pth')
-        torch.save(self.critic.state_dict(), f'{save_dir}/critic.pth')
 
     def train(self):
         self.actor.train()
